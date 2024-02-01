@@ -1,0 +1,69 @@
+---
+title: "NICAR_workshop"
+author: "Justin Braun"
+date: "2024-02-01"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+#set up wd, how will this work on NICAR machines?
+
+```
+
+## Load libraries
+
+## Loading and exploring relevant files
+
+```{r}
+#synth data
+#synth data gender duplicate TODO
+#model file
+#demographic data file #TODO
+```
+
+
+## Step 1: Exploring representativeness of the training data
+```{r}
+#compare synth data breakdown across gender, age, and marriage with realworld pop
+#make grouped bargraphs to illustrate
+```
+
+## Step 2: Exploring Features
+Link to our feature group analysis. *Do the easy stuff first*
+```{r}
+#make correlation matrix between demographic vars and neighborhoods -> are neighborhoods proxy variables
+#make pretty heat map to show potential proxy relationships
+```
+
+## Step 3: Analyzing the model itself
+Link to Gabriel's exploration tool
+
+## Step 4: Fairness tests
+```{r}
+###Statistical Parity###
+#predict synth data
+#make color coded overlapping density plot by gender
+#show a few summary stats by gender
+
+###Conditional statistical parity###
+#predict synth data with gender break down
+#make color coded overlapping density plot by gender
+#show a few summary stats by gender
+
+
+#make up true outcomes (higher probability for women)
+#set HR threshold and classify obs into HR and LR
+
+#make confusion matrix by gender
+#calculate FP error rate and precision by gender
+```
+
+
+
+## [Optional] Step 5: Model performance
+Link to html file with performance eval
+
+
+
+
