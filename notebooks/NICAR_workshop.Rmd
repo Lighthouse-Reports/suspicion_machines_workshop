@@ -51,6 +51,8 @@ Link to Gabriel's exploration tool
 #make color coded overlapping density plot by gender
 #show a few summary stats by gender
 
+###Non-linear analysis### 
+# Using interesting features from the model type portion, test some interesting non linear relationships. 
 
 #make up true outcomes (higher probability for women)
 #set HR threshold and classify obs into HR and LR
