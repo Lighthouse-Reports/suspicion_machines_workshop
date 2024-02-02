@@ -1,70 +1,257 @@
 ---
 title: "NICAR_workshop"
-author: "Justin Braun"
+author: "Justin Braun & Gabriel Geiger"
 date: "2024-02-01"
 output: html_document
 ---
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
-#set up wd, how will this work on NICAR machines?
-
+knitr::opts_knit$set(root.dir = '') #TODO change so it sets itself up to the dir it is in
 ```
 
 ## Load libraries
+```{r}
+if (!require("pacman")) install.packages("pacman")
+pacman::p_load(dplyr, ggplot2, caret, tidyr, readxl, corrplot, gbm)
+```
+
+This workshop is based on an investigation by Lighthouse Reports and WIRED into predictive ML tools used to predict fraud risk among Rotterdam's welfare population. The investigation found that women, parents and people of foreign background were at substantially higher risk to be flagged, illustrating the discriminatory potential of tools like these.
+You can find the investigation here: https://www.wired.com/story/welfare-state-algorithms/ and our Methodology here: https://www.lighthousereports.com/suspicion-machines-methodology/.
+This workshop is meant to help you think systematically take you through the steps we used to interrogate Rotterdam's model and hopefully inspire future reporting on similar systems.
 
 ## Loading and exploring relevant files
 
 ```{r}
-#synth data
-#synth data gender duplicate TODO
-#model file
-#demographic data file #TODO
+#This is synthetic data we build based on the real training data that was accidentally leaked to us. 
+# You can find our script to build this data here: https://github.com/Lighthouse-Reports/suspicion_machine
+synth_df <- read.csv('data/01_raw/synth_data.csv')
+
+#This is the same synthetic data as above but duplicated: in one copy, all people are set to be women, in the other, everybody is male
+#You can also find the script we used to build the duplicates in our Github
+synth_df_gender <- read.csv('data/01_raw/synth_data_gender.csv')
+
+#This is the actual final model file from Rotterdam which we got through FOIA.
+final_model <- readRDS('data/01_raw/20220929_finale_model.rds')$model[[1]]
+
+#This is some basic demographic about the Rotterdam welfare beneficiary population we obtained through a press request.
+demographics <- readxl::read_excel('data/01_raw/welfare_recepient_stats.xlsx', sheet = 'demographics')
 ```
 
 
 ## Step 1: Exploring representativeness of the training data
+Why does this matter? If certain groups are missing or are under-represented in the training data than a model will be worse at making predictions when it encounters members of these groups during deployment. A common example of this are face recognition systems trained mostly on white and male training data that perform poorly when used against Black people.
+Unrepresentative training data can also point to issues in the data generation process that might encode relationships in the training data which don't exist in the real world. For example if only men who have committed fraud are included in the training data, but both female fraudsters and women who have done nothing wrong are used, then the model will learn to associate being male with committing fraud even if this relationship is just a function of the data generation process.
 ```{r}
-#compare synth data breakdown across gender, age, and marriage with realworld pop
-#make grouped bargraphs to illustrate
+print(demographics)
+#format demographic data so it can be compared easily with the training data
+demographics_formatted <- demographics %>%
+  dplyr::select(characteristic_english, group_english, count) %>%
+  dplyr::group_by(characteristic_english) %>%
+  dplyr::mutate(real_world_share = count/sum(count, na.rm = T)) %>%
+  dplyr::rename(real_world_count = count)
+
+#create summary stats for gender from training data
+summary_td_gender <- synth_df %>%
+  dplyr::group_by(persoon_geslacht_vrouw) %>% #group by gender
+  dplyr::summarise(td_count = n()) %>% #count number of observations by gender
+  dplyr::rename(group_english = persoon_geslacht_vrouw) %>% #rename gender variable
+  dplyr::mutate(characteristic_english = 'gender', #set up variables to match the demographics_formatted df
+                group_english = ifelse(group_english == 1, 'woman', 'man'),
+                td_share = td_count/sum(td_count, na.rm = T))
+
+#create summary stats for age from training data
+summary_td_age <- synth_df %>%
+  #set up grouped age variable
+  dplyr::mutate(age_groups = case_when(persoon_leeftijd_bij_onderzoek < 27 ~ 'below_27',
+                                       persoon_leeftijd_bij_onderzoek >= 27 & persoon_leeftijd_bij_onderzoek < 45 ~ '27-45',
+                                       persoon_leeftijd_bij_onderzoek >= 45 ~ '45_above',
+                                       .default = NA)) %>%
+  dplyr::group_by(age_groups) %>% #group by age groups
+  dplyr::summarise(td_count = n()) %>% #count number of observations by age group
+  dplyr::rename(group_english = age_groups) %>% #rename age group variable
+  dplyr::mutate(characteristic_english = 'age', #set up variables to match the demographics_formatted df
+                td_share = td_count/sum(td_count, na.rm = T))
+
+# TO EXPLORE: we could do the same for family status breakdowns but the variables in the training data aren't perfect matches for the 
+# family status classifications in the 'demographics'. You could explore whether the training data is representative using variables related to 
+# parenthood and relationship status. Also, check out the codebook at (look at 'data/02_feature_information/feature_handbook.xlsx').
+
+#combine age and gender summary stats dataframes
+summary_stats_td <- dplyr::bind_rows(summary_td_gender, summary_td_age)
+
+#merge training data summary stats with realworld
+demographics_formatted <- demographics_formatted %>%
+  dplyr::left_join(summary_stats_td, by = c('characteristic_english', 'group_english'))
+
+#format data for plotting
+demographics_long <- demographics_formatted %>%
+  dplyr::filter(!is.na(td_share)) %>%
+  tidyr::pivot_longer(cols = dplyr::ends_with('share'), names_to = 'data_source', values_to = 'share')%>%
+  dplyr::mutate(data_source = ifelse(data_source == 'td_share', 'training data', 'real world'))
+  
+#plot demographic breakdowns
+ggplot2::ggplot(demographics_long, aes(x = group_english, y = share, fill = data_source))+
+  geom_bar(stat = 'identity', position = 'dodge') +
+  facet_wrap(.~characteristic_english, scales = 'free_x')+
+  labs(x = '', fill = 'Data Source',
+       title = 'Comparison between training data and real world demographic breakdowns')
+
+#TO EXPLORE: Would you say these differences are sufficient that the training data should be considered
+#unrepresentative? Are we sure that we are comparing apples to apples here? Have a look at this:
+summary(synth_df$persoon_leeftijd_bij_onderzoek)
+#Does this change your mind?
 ```
 
 ## Step 2: Exploring Features
-Link to our feature group analysis. *Do the easy stuff first*
+Why does this matter? Some features, or variables to predict fraud, are more problematic than others. The use of some variables might interfere directly with anti-discrimination legislation and if the public learns about their use, it can be the basis for successful litigation. Relatedly, especially in the US context, a lot of focus has been ob proxy variables -- variables that indirectly encode sensitive characteristics (such as postcodes which heavily correlate with race due to redlining). However, and you will see this in the exercise below, it's always good to first understand what variables are actually available before going on a quest to find proxy relationships!
+All of that being said, it is important to note that the use of problematic variables should not be equated with discriminatory outcomes. 
 ```{r}
-#make correlation matrix between demographic vars and neighborhoods -> are neighborhoods proxy variables
-#make pretty heat map to show potential proxy relationships
+neighborhood_variables <- names(synth_df)[grepl('adres_recentste_wijk', names(synth_df))]
+demographic_variables <- c('persoon_geslacht_vrouw', 'persoon_leeftijd_bij_onderzoek', 'relatie_kind_huidige_aantal', 'persoonlijke_eigenschappen_spreektaal_anders')
+
+#restrict training data to only contain demographic and neighborhood variables
+synth_df_restricted <- synth_df %>%
+  dplyr::select(all_of(c(neighborhood_variables, demographic_variables)))
+
+#compute correlation matrix for selected variables
+corr_matrix <- cor(synth_df_restricted) %>%
+  as.data.frame() %>%
+  dplyr::select(all_of(neighborhood_variables)) %>% #keep only neighborhood variables as columns
+  dplyr::filter(row.names(.) %in% demographic_variables) %>% #keep only demographic variables as rows
+  as.matrix()
+
+corrplot::corrplot(corr_matrix, method = 'color')
+
+#TO EXPLORE: What else can we learn from a correlation analysis like this? It turns out that Rotterdam's model uses a bunch of subjective case worker assessments of beneficiaries to predict fraud. Are any of these characteristics associated with demographics? What would it mean for the model if they are? Many of these variables start with 'competentie_'!
 ```
 
 ## Step 3: Analyzing the model itself
-Link to Gabriel's exploration tool
+Machine learning models map input features to a risk score. However, how exactly a risk score is derived often remains under-explored. The Rotterdam model is based on hundreds of decision trees, which means that different people are judged on the basis of different characteristics. Exploring a model's 'decision-making process' opens up discussions about equal treatment and due process standards in equivalent analog processes.
+TODO: Gabriel insert link to your tool
 
 ## Step 4: Fairness tests
+While all of the previous steps are also related to fairness, most discussions around machine learning fairness focus on equal performance for protected groups, such as men and women. But there are a ton of performance metrics to choose from. Does it matter how accurate a tool is? Should the people flagged be of equal likelihood to have done something wrong? Or is it most important for the system to avoid mistakes? The answer to these questions depends on the context and the relative harm caused by different outcomes.
+For our investigation, we didn't have access to the outcome variable, i.e., we didn't know whether people in the dataset had actually committed fraud. To illustrate additional approaches to fairness, we randomly generated the outcome variable for the purpose of this workshop.
 ```{r}
 ###Statistical Parity###
 #predict synth data
-#make color coded overlapping density plot by gender
-#show a few summary stats by gender
+risk_scores <- predict.train(final_model, newdata = synth_df, type = 'prob')
+synth_df$risk <- risk_scores$Ja
+
+#Let's make up a risk score threshold
+threshold <- 0.7
+synth_df <- synth_df %>%
+  mutate(high_risk = ifelse(risk > threshold, 1, 0))
+
+
+#color coded overlapping density plot of risk scores by gender
+ggplot(synth_df, aes(x = risk, colour = as.factor(persoon_geslacht_vrouw), fill = as.factor(persoon_geslacht_vrouw))) +
+  geom_density(alpha = 0.2)+
+  labs(x = 'Risk Score', y = 'Risk Score Density',
+       labs = 'Gender', title = 'Statistical Parity: Risk Score Distribution by Gender')
+
+#Let's calculate some summary stats for the risk scores by gender
+statistical_parity_summary_gender <- synth_df %>%
+  dplyr::group_by(persoon_geslacht_vrouw) %>%
+  dplyr::summarise(mean_risk = mean(risk, na.rm = T),
+                   median_risk = median(risk, na.rm = T),
+                   share_high_risk = mean(high_risk, na.rm = T))
+print(statistical_parity_summary_gender)
+
 
 ###Conditional statistical parity###
-#predict synth data with gender break down
-#make color coded overlapping density plot by gender
-#show a few summary stats by gender
+#predict synth data
+risk_scores <- predict.train(final_model, newdata = synth_df_gender, type = 'prob')
+synth_df_gender$risk <- risk_scores$Ja
 
-###Non-linear analysis### 
-# Using interesting features from the model type portion, test some interesting non linear relationships. 
+#Let's make up a risk score threshold
+synth_df_gender <- synth_df_gender %>%
+  mutate(high_risk = ifelse(risk > threshold, 1, 0))
 
-#make up true outcomes (higher probability for women)
-#set HR threshold and classify obs into HR and LR
 
-#make confusion matrix by gender
-#calculate FP error rate and precision by gender
+#color coded overlapping density plot of risk scores by gender
+ggplot(synth_df_gender, aes(x = risk, colour = as.factor(persoon_geslacht_vrouw), fill = as.factor(persoon_geslacht_vrouw))) +
+  geom_density(alpha = 0.2)+
+  labs(x = 'Risk Score', y = 'Risk Score Density',
+       labs = 'Gender', title = 'Conditional Statistical Parity: Risk Score Distribution by Gender')
+
+#Let's calculate some summary stats for the risk scores by gender
+statistical_parity_summary_gender <- synth_df_gender %>%
+  dplyr::group_by(persoon_geslacht_vrouw) %>%
+  dplyr::summarise(mean_risk = mean(risk, na.rm = T),
+                   median_risk = median(risk, na.rm = T),
+                   share_high_risk = mean(high_risk, na.rm = T))
+print(statistical_parity_summary_gender)
+
+#We didn't get access to the true outcome variable, i.e., whether a person has actually committed fraud or not. To illustrate other fairness definitions,
+#which require true outcomes, we will make it up for illustrative purposes.
+set.seed(9999) #setting a seed for reproducibility
+synth_df$outcome <- NA
+for(i in 1:nrow(synth_df)){
+  row <- synth_df[i,]
+  if(row$persoon_geslacht_vrouw == 1 & row$high_risk == 1){
+    synth_df[i,]$outcome <- rbinom(n=1, size=1, prob=0.6) #We set high-risk women's probability to 60%
+  } else if(row$persoon_geslacht_vrouw == 0 & row$high_risk == 1){
+    synth_df[i,]$outcome <- rbinom(n=1, size=1, prob=0.8) #We set high-risk men's probability to 80%
+  } else if(row$persoon_geslacht_vrouw == 1 & row$high_risk == 0){
+    synth_df[i,]$outcome <- rbinom(n=1, size=1, prob=0.3) #We set low-risk women's probability to 30%
+  } else {
+    synth_df[i,]$outcome <- rbinom(n=1, size=1, prob=0.5) #We set low-risk men's probability to 40%
+  }
+}
+
+#Make confusion matrix for overall result
+cm <- table(synth_df$outcome, synth_df$high_risk, dnn = c('outcome', 'prediction'))
+print(cm)
+
+#Restrict dataset to men
+synth_men <- synth_df %>%
+  dplyr::filter(persoon_geslacht_vrouw == 0)
+
+#Restrict dataset to women
+synth_women <- synth_df %>%
+  dplyr::filter(persoon_geslacht_vrouw == 1)
+
+#Make confusion matrix for men
+cm_men <- table(synth_men$outcome, synth_men$high_risk, dnn = c('outcome', 'prediction'))
+print(cm_men)
+
+#Make confusion matrix for women
+cm_women <- table(synth_women$outcome, synth_women$high_risk, dnn = c('outcome', 'prediction'))
+print(cm_women)
+
+#Calculate key performance indicators using confusion matrix
+calc_metrics <- function(cur_cm, category){
+  tp <- cur_cm[2,2]
+  fp <- cur_cm[1,2]
+  tn <- cur_cm[1,1]
+  fn <- cur_cm[2,1]
+  metrics <- data.frame(
+    cat = category,
+    overall_accuracy = ((tp + tn)/(tp+fp+tn+fn)), #How good is a model at distinguishing between between yes fraud/no fraud
+    precision = (tp/(tp+fp)), #Among the people flagged, what is the share of people who have actually commited fraud?
+    fp_error_balance = (fp/(fp+tn)) #Among the people who have not committed fraud, what is the share who were falsely flagged by the model
+  )
+  return(metrics)
+}
+
+#Calculate performance indicators overall, for men, and for women
+metrics_overall <- calc_metrics(cm, 'overall')
+metrics_men <- calc_metrics(cm_men, 'men')
+metrics_women <- calc_metrics(cm_women, 'women')
+
+metrics_combined <- bind_rows(metrics_overall, metrics_women, metrics_men)
+print(metrics_combined)
+
+#TO EXPLORE: Can you think of other fairness definitions based on these confusion matrices? What other variables would you test this for?
+# If you want to take a deep dive, we highly recommend this video: https://www.youtube.com/watch?v=jIXIuYdnyyk&t=6s and this paper is also great: https://fairware.cs.umass.edu/papers/Verma.pdf
 ```
 
 
 
-## [Optional] Step 5: Model performance
-Link to html file with performance eval
+## [TO EXPLORE] Step 5: Model performance
+Finally, it should matter how well a model actually performs. Luckily, Rotterdam carried out some of these tests on their own. You can find their evaluation file at 'data/03_performance_evaluation/VRAAG_3_controle_model_ANON.html'. Do you think the model performs well enough to be deployed?
 
 
 
