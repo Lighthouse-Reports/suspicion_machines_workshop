@@ -3,21 +3,26 @@ title: "NICAR_workshop"
 author: "Justin Braun & Gabriel Geiger"
 date: "2024-02-01"
 output: html_document
+editor_options: 
+  markdown: 
+    wrap: sentence
 ---
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
-knitr::opts_knit$set(root.dir = '') #TODO change so it sets itself up to the dir it is in
+knitr::opts_knit$set(root.dir = '/Users/user/Desktop/hands_on_classes/20240309-saturday-develop-and-test-hypotheses-on-a-risk-assessment-algorithm')
 ```
 
 ## Load libraries
+
 ```{r}
 if (!require("pacman")) install.packages("pacman")
 pacman::p_load(dplyr, ggplot2, caret, tidyr, readxl, corrplot, gbm)
 ```
 
-This workshop is based on an investigation by Lighthouse Reports and WIRED into predictive ML tools used to predict fraud risk among Rotterdam's welfare population. The investigation found that women, parents and people of foreign background were at substantially higher risk to be flagged, illustrating the discriminatory potential of tools like these.
-You can find the investigation here: https://www.wired.com/story/welfare-state-algorithms/ and our Methodology here: https://www.lighthousereports.com/suspicion-machines-methodology/.
+This workshop is based on an investigation by Lighthouse Reports and WIRED into predictive ML tools used to predict fraud risk among Rotterdam's welfare population.
+The investigation found that women, parents and people of foreign background were at substantially higher risk to be flagged, illustrating the discriminatory potential of tools like these.
+You can find the investigation here: <https://www.wired.com/story/welfare-state-algorithms/> and our Methodology here: <https://www.lighthousereports.com/suspicion-machines-methodology/>.
 This workshop is meant to help you think systematically take you through the steps we used to interrogate Rotterdam's model and hopefully inspire future reporting on similar systems.
 
 ## Loading and exploring relevant files
@@ -38,10 +43,14 @@ final_model <- readRDS('data/01_raw/20220929_finale_model.rds')$model[[1]]
 demographics <- readxl::read_excel('data/01_raw/welfare_recepient_stats.xlsx', sheet = 'demographics')
 ```
 
-
 ## Step 1: Exploring representativeness of the training data
-Why does this matter? If certain groups are missing or are under-represented in the training data than a model will be worse at making predictions when it encounters members of these groups during deployment. A common example of this are face recognition systems trained mostly on white and male training data that perform poorly when used against Black people.
-Unrepresentative training data can also point to issues in the data generation process that might encode relationships in the training data which don't exist in the real world. For example if only men who have committed fraud are included in the training data, but both female fraudsters and women who have done nothing wrong are used, then the model will learn to associate being male with committing fraud even if this relationship is just a function of the data generation process.
+
+Why does this matter?
+If certain groups are missing or are under-represented in the training data than a model will be worse at making predictions when it encounters members of these groups during deployment.
+A common example of this are face recognition systems trained mostly on white and male training data that perform poorly when used against Black people.
+Unrepresentative training data can also point to issues in the data generation process that might encode relationships in the training data which don't exist in the real world.
+For example if only men who have committed fraud are included in the training data, but both female fraudsters and women who have done nothing wrong are used, then the model will learn to associate being male with committing fraud even if this relationship is just a function of the data generation process.
+
 ```{r}
 print(demographics)
 #format demographic data so it can be compared easily with the training data
@@ -104,8 +113,14 @@ summary(synth_df$persoon_leeftijd_bij_onderzoek)
 ```
 
 ## Step 2: Exploring Features
-Why does this matter? Some features, or variables to predict fraud, are more problematic than others. The use of some variables might interfere directly with anti-discrimination legislation and if the public learns about their use, it can be the basis for successful litigation. Relatedly, especially in the US context, a lot of focus has been ob proxy variables -- variables that indirectly encode sensitive characteristics (such as postcodes which heavily correlate with race due to redlining). However, and you will see this in the exercise below, it's always good to first understand what variables are actually available before going on a quest to find proxy relationships!
-All of that being said, it is important to note that the use of problematic variables should not be equated with discriminatory outcomes. 
+
+Why does this matter?
+Some features, or variables to predict fraud, are more problematic than others.
+The use of some variables might interfere directly with anti-discrimination legislation and if the public learns about their use, it can be the basis for successful litigation.
+Relatedly, especially in the US context, a lot of focus has been ob proxy variables -- variables that indirectly encode sensitive characteristics (such as postcodes which heavily correlate with race due to redlining).
+However, and you will see this in the exercise below, it's always good to first understand what variables are actually available before going on a quest to find proxy relationships!
+All of that being said, it is important to note that the use of problematic variables should not be equated with discriminatory outcomes.
+
 ```{r}
 neighborhood_variables <- names(synth_df)[grepl('adres_recentste_wijk', names(synth_df))]
 demographic_variables <- c('persoon_geslacht_vrouw', 'persoon_leeftijd_bij_onderzoek', 'relatie_kind_huidige_aantal', 'persoonlijke_eigenschappen_spreektaal_anders')
@@ -127,12 +142,24 @@ corrplot::corrplot(corr_matrix, method = 'color')
 ```
 
 ## Step 3: Analyzing the model itself
-Machine learning models map input features to a risk score. However, how exactly a risk score is derived often remains under-explored. The Rotterdam model is based on hundreds of decision trees, which means that different people are judged on the basis of different characteristics. Exploring a model's 'decision-making process' opens up discussions about equal treatment and due process standards in equivalent analog processes.
-TODO: Gabriel insert link to your tool
+
+Machine learning models map input features to a risk score.
+However, how exactly a risk score is derived often remains under-explored.
+The Rotterdam model is based on hundreds of decision trees, which means that different people are judged on the basis of different characteristics.
+Exploring a model's 'decision-making process' opens up discussions about equal treatment and due process standards in equivalent analog processes.
+<https://decision-trees-svelte.vercel.app/>
 
 ## Step 4: Fairness tests
-While all of the previous steps are also related to fairness, most discussions around machine learning fairness focus on equal performance for protected groups, such as men and women. But there are a ton of performance metrics to choose from. Does it matter how accurate a tool is? Should the people flagged be of equal likelihood to have done something wrong? Or is it most important for the system to avoid mistakes? The answer to these questions depends on the context and the relative harm caused by different outcomes.
-For our investigation, we didn't have access to the outcome variable, i.e., we didn't know whether people in the dataset had actually committed fraud. To illustrate additional approaches to fairness, we randomly generated the outcome variable for the purpose of this workshop.
+
+While all of the previous steps are also related to fairness, most discussions around machine learning fairness focus on equal performance for protected groups, such as men and women.
+But there are a ton of performance metrics to choose from.
+Does it matter how accurate a tool is?
+Should the people flagged be of equal likelihood to have done something wrong?
+Or is it most important for the system to avoid mistakes?
+The answer to these questions depends on the context and the relative harm caused by different outcomes.
+For our investigation, we didn't have access to the outcome variable, i.e., we didn't know whether people in the dataset had actually committed fraud.
+To illustrate additional approaches to fairness, we randomly generated the outcome variable for the purpose of this workshop.
+
 ```{r}
 ###Statistical Parity###
 #predict synth data
@@ -231,7 +258,7 @@ calc_metrics <- function(cur_cm, category){
     cat = category,
     overall_accuracy = ((tp + tn)/(tp+fp+tn+fn)), #How good is a model at distinguishing between between yes fraud/no fraud
     precision = (tp/(tp+fp)), #Among the people flagged, what is the share of people who have actually commited fraud?
-    fp_error_balance = (fp/(fp+tn)) #Among the people who have not committed fraud, what is the share who were falsely flagged by the model
+    fp_error = (fp/(fp+tn)) #Among the people who have not committed fraud, what is the share who were falsely flagged by the model
   )
   return(metrics)
 }
@@ -248,11 +275,9 @@ print(metrics_combined)
 # If you want to take a deep dive, we highly recommend this video: https://www.youtube.com/watch?v=jIXIuYdnyyk&t=6s and this paper is also great: https://fairware.cs.umass.edu/papers/Verma.pdf
 ```
 
-
-
 ## [TO EXPLORE] Step 5: Model performance
-Finally, it should matter how well a model actually performs. Luckily, Rotterdam carried out some of these tests on their own. You can find their evaluation file at 'data/03_performance_evaluation/VRAAG_3_controle_model_ANON.html'. Do you think the model performs well enough to be deployed?
 
-
-
-
+Finally, it should matter how well a model actually performs.
+Luckily, Rotterdam carried out some of these tests on their own.
+You can find their evaluation file at 'data/03_performance_evaluation/VRAAG_3_controle_model_ANON.html'.
+Do you think the model performs well enough to be deployed?
