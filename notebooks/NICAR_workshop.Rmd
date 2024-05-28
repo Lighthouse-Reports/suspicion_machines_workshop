@@ -10,7 +10,6 @@ editor_options:
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
-knitr::opts_knit$set(root.dir = '/Users/user/Desktop/hands_on_classes/20240309-saturday-develop-and-test-hypotheses-on-a-risk-assessment-algorithm')
 ```
 
 ## Load libraries
@@ -30,17 +29,17 @@ This workshop is meant to help you think systematically take you through the ste
 ```{r}
 #This is synthetic data we build based on the real training data that was accidentally leaked to us. 
 # You can find our script to build this data here: https://github.com/Lighthouse-Reports/suspicion_machine
-synth_df <- read.csv('data/01_raw/synth_data.csv')
+synth_df <- read.csv('../data/01_raw/synth_data.csv')
 
 #This is the same synthetic data as above but duplicated: in one copy, all people are set to be women, in the other, everybody is male
 #You can also find the script we used to build the duplicates in our Github
-synth_df_gender <- read.csv('data/01_raw/synth_data_gender.csv')
+synth_df_gender <- read.csv('../data/01_raw/synth_data_gender.csv')
 
 #This is the actual final model file from Rotterdam which we got through FOIA.
-final_model <- readRDS('data/01_raw/20220929_finale_model.rds')$model[[1]]
+final_model <- readRDS('../data/01_raw/20220929_finale_model.rds')$model[[1]]
 
 #This is some basic demographic about the Rotterdam welfare beneficiary population we obtained through a press request.
-demographics <- readxl::read_excel('data/01_raw/welfare_recepient_stats.xlsx', sheet = 'demographics')
+demographics <- readxl::read_excel('../data/01_raw/welfare_recepient_stats.xlsx', sheet = 'demographics')
 ```
 
 ## Step 1: Exploring representativeness of the training data
