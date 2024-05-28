@@ -35,6 +35,12 @@ synth_df <- read.csv('../data/01_raw/synth_data.csv')
 #You can also find the script we used to build the duplicates in our Github
 synth_df_gender <- read.csv('../data/01_raw/synth_data_gender.csv')
 
+
+#This is the same synthetic data as above but multiplied: each copy corresponds to a distinct age group from 20 to 75 
+# in five year intervals
+synth_df_age <- read.csv('../data/01_raw/synth_data_age.csv') %>%
+  filter(persoon_leeftijd_bij_onderzoek < 65) #we remove beneficiaries above 60 because the model was never deployed against them
+
 #This is the actual final model file from Rotterdam which we got through FOIA.
 final_model <- readRDS('../data/01_raw/20220929_finale_model.rds')$model[[1]]
 
@@ -168,47 +174,49 @@ synth_df$risk <- risk_scores$Ja
 #Let's make up a risk score threshold
 threshold <- 0.7
 synth_df <- synth_df %>%
-  mutate(high_risk = ifelse(risk > threshold, 1, 0))
+  mutate(high_risk = ifelse(risk > threshold, 1, 0),
+         age_group = ifelse(persoon_leeftijd_bij_onderzoek <= 30, '< 30', '> 30'))
 
 
-#color coded overlapping density plot of risk scores by gender
-ggplot(synth_df, aes(x = risk, colour = as.factor(persoon_geslacht_vrouw), fill = as.factor(persoon_geslacht_vrouw))) +
+#color coded overlapping density plot of risk scores by age group
+ggplot(synth_df, aes(x = risk, colour = as.factor(age_group), fill = as.factor(age_group))) +
   geom_density(alpha = 0.2)+
   labs(x = 'Risk Score', y = 'Risk Score Density',
-       labs = 'Gender', title = 'Statistical Parity: Risk Score Distribution by Gender')
+       labs = 'Age Group', title = 'Statistical Parity: Risk Score Distribution by Age Group')
 
-#Let's calculate some summary stats for the risk scores by gender
-statistical_parity_summary_gender <- synth_df %>%
-  dplyr::group_by(persoon_geslacht_vrouw) %>%
+#Let's calculate some summary stats for the risk scores by age group
+statistical_parity_summary_age <- synth_df %>%
+  dplyr::group_by(age_group) %>%
   dplyr::summarise(mean_risk = mean(risk, na.rm = T),
                    median_risk = median(risk, na.rm = T),
                    share_high_risk = mean(high_risk, na.rm = T))
-print(statistical_parity_summary_gender)
+print(statistical_parity_summary_age)
 
 
 ###Conditional statistical parity###
 #predict synth data
-risk_scores <- predict.train(final_model, newdata = synth_df_gender, type = 'prob')
-synth_df_gender$risk <- risk_scores$Ja
+risk_scores <- predict.train(final_model, newdata = synth_df_age, type = 'prob')
+synth_df_age$risk <- risk_scores$Ja
 
 #Let's make up a risk score threshold
-synth_df_gender <- synth_df_gender %>%
-  mutate(high_risk = ifelse(risk > threshold, 1, 0))
+synth_df_age <- synth_df_age %>%
+  mutate(high_risk = ifelse(risk > threshold, 1, 0),
+         age_group = ifelse(persoon_leeftijd_bij_onderzoek <= 30, '< 30', '> 30'))
 
 
 #color coded overlapping density plot of risk scores by gender
-ggplot(synth_df_gender, aes(x = risk, colour = as.factor(persoon_geslacht_vrouw), fill = as.factor(persoon_geslacht_vrouw))) +
+ggplot(synth_df_age, aes(x = risk, colour = as.factor(age_group), fill = as.factor(age_group))) +
   geom_density(alpha = 0.2)+
   labs(x = 'Risk Score', y = 'Risk Score Density',
-       labs = 'Gender', title = 'Conditional Statistical Parity: Risk Score Distribution by Gender')
+       labs = 'Age Group', title = 'Conditional Statistical Parity: Risk Score Distribution by Age Group')
 
 #Let's calculate some summary stats for the risk scores by gender
-statistical_parity_summary_gender <- synth_df_gender %>%
-  dplyr::group_by(persoon_geslacht_vrouw) %>%
+statistical_parity_summary_age <- synth_df_age %>%
+  dplyr::group_by(age_group) %>%
   dplyr::summarise(mean_risk = mean(risk, na.rm = T),
                    median_risk = median(risk, na.rm = T),
                    share_high_risk = mean(high_risk, na.rm = T))
-print(statistical_parity_summary_gender)
+print(statistical_parity_summary_age)
 
 #We didn't get access to the true outcome variable, i.e., whether a person has actually committed fraud or not. To illustrate other fairness definitions,
 #which require true outcomes, we will make it up for illustrative purposes.
